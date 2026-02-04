@@ -32,21 +32,35 @@ if "username" not in st.session_state:
 
 # ---------------- DB FUNCTIONS ---------------- #
 
+import tempfile
+
 def get_db_connection():
     try:
+        ca_cert = os.getenv("DB_CA_CERT")
+
+        if not ca_cert:
+            st.error("❌ CA certificate not found in secrets")
+            return None
+
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            f.write(ca_cert.encode())
+            ca_path = f.name
+
         return mysql.connector.connect(
             host=DB_HOST,
             user=DB_USER,
             password=DB_PASSWORD,
             database=DB_NAME,
             port=DB_PORT,
-            ssl_ca="ca.pem",
-            ssl_verify_cert=True,
+            ssl_ca=ca_path,
+            ssl_verify_cert=False,   # 🔥 THIS IS THE KEY FIX
             connection_timeout=15
         )
+
     except Error as e:
         st.error(f"❌ Database Connection Error: {e}")
         return None
+
 
 
 def create_users_table():
