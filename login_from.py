@@ -1,108 +1,161 @@
 import streamlit as st
-st.header("Student information form")
+import mysql.connector
+from mysql.connector import Error
+import re
+import time
+from datetime import datetime
+from dotenv import load_dotenv
+import os
 
-st.title("enter your details")
+# Load environment variables
+load_dotenv()
 
-st.subheader("Please fill out the form below:")
+# Page config
+st.set_page_config(
+    page_title="User Authentication",
+    page_icon="🔐",
+    layout="centered"
+)
 
-st.markdown("---------")
+# Database configuration
+DB_HOST = os.getenv("DB_HOST")
+DB_USER = os.getenv("DB_USER")
+DB_PASSWORD = os.getenv("DB_PASSWORD")
+DB_NAME = os.getenv("DB_NAME")
+DB_PORT = int(os.getenv("DB_PORT"))
 
-st.text("This form collects basic student information.")
+# Session state
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+if "username" not in st.session_state:
+    st.session_state.username = None
 
-st.write({"name":"noor","age":1})
+# ---------------- DB FUNCTIONS ---------------- #
 
-st.markdown("### Thank you for your cooperation!")
-st.markdown("**Bold**")
-st.markdown("*Italic*")
-st.markdown("-Item 1\n-Item 2\n-Item 3")
-st.markdown("<h3 style=color:blue>Thank you!!</h3>",unsafe_allow_html=True)
-
-st.caption("This is a caption for the form.")
-
-st.code("""
-        def add(a,b):
-            return a+b
-        """,language="python")
-
-st.latex(r"""
-a^2 + b^2 = c^2
-""")
-
-st.divider()
-
-col1, col2 = st.columns(2)
-
-with col1:
-    st.write("This is column 1")
-
-with col2:
-    st.write("This is column 2")
-
-if st.button("click me"):
-    st.write("Button clicked!")
-    st.success("Form submitted successfully!")
-    st.balloons()
-else:
-    st.write("Please click the button to submit the form.")
-name=st.text_input("Enter your name:")
-if name =="":
-    st.warning("Name cannot be empty")
-elif not name.isalpha():
-    st.error("Name must contain only letters")
-else:
-    st.success("Valid name")
-
-feedback=st.text_area("Enter your feedback:")
-st.write("You entered:",feedback)
-
-st.checkbox("I agree to the terms and conditions")
-
-option=st.radio("Select your grade:",["A","B","C","D","F"])
-st.write(f"You selected grade: {option}")
-
-abc=st.selectbox("Select your major:",["Computer Science","Mathematics","Physics","Chemistry"])
-st.write(f"You selected major: {abc}")
-
-select=st.multiselect("Select your hobbies:",["Reading","Sports","Music","Traveling"])
-st.write(f"You selected hobbies: {select}")
-
-age=st.slider("Select your age:",0,100,25)
-st.write(f"You selected age: {age}")
+def get_db_connection():
+    try:
+        return mysql.connector.connect(
+            host=DB_HOST,
+            user=DB_USER,
+            password=DB_PASSWORD,
+            database=DB_NAME,
+            port=DB_PORT,
+            ssl_ca="ca.pem",
+            ssl_verify_cert=True,
+            connection_timeout=15
+        )
+    except Error as e:
+        st.error(f"❌ Database Connection Error: {e}")
+        return None
 
 
-pro=st.file_uploader("Upload your profile picture:",type=["jpg","png","jpeg"])
-if pro is not None:
-    st.image(pro)
+def create_users_table():
+    conn = get_db_connection()
+    if not conn:
+        return
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            username VARCHAR(100) UNIQUE NOT NULL,
+            email VARCHAR(255) UNIQUE NOT NULL,
+            password VARCHAR(255) NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.commit()
+    cursor.close()
+    conn.close()
 
-with st.form("submission_form"):
-    st.text_input("Enter your email:")
-    st.number_input("Enter your student ID:",min_value=0)
-    sub=st.form_submit_button("Submit")
-if sub:
-    st.write("Form submitted!")
 
-c1, c2,c3=st.columns(3)
-with c1:
-    st.button("Column 1 Button")
-with c2:
-    st.button("Column 2 Button")
-with c3:
-    st.button("Column 3 Button")
+def register_user(username, email, password):
+    if not username or not email or not password:
+        st.warning("⚠️ All fields are required")
+        return False
+
+    if len(password) < 6:
+        st.warning("⚠️ Password must be at least 6 characters")
+        return False
+
+    email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    if not re.match(email_pattern, email):
+        st.warning("⚠️ Invalid email format")
+        return False
+
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO users (username, email, password) VALUES (%s, %s, %s)",
+            (username, email, password)
+        )
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return True
+    except mysql.connector.IntegrityError:
+        st.error("❌ Username or email already exists")
+        return False
 
 
-con=st.container()
-con.write("This is inside a container.")
-con.button("click")
+def login_user(username, password):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id FROM users WHERE username=%s AND password=%s",
+        (username, password)
+    )
+    result = cursor.fetchone()
+    cursor.close()
+    conn.close()
+    return result is not None
 
-data={"Name":"Noor","Age":1,"Major":"CS"}
-st.table(data)
+# ---------------- UI ---------------- #
 
-options=st.sidebar.selectbox("Select an option:",["Option 1","Option 2","Option 3"])
-st.sidebar.write(f"You selected: {options}")
+def main():
+    create_users_table()
 
-@st.cache_data
-def compute_square(n):
-    return n*n
-p=st.number_input("enter a number to compute its square:")
-result=compute_square(p)
-st.write(f"The square of {p} is {result}")
+    st.title("🔐 Secure Login System")
+
+    if st.session_state.logged_in:
+        st.success(f"✅ Welcome, {st.session_state.username}")
+        if st.button("🚪 Logout"):
+            st.session_state.logged_in = False
+            st.session_state.username = None
+            st.rerun()
+        return
+
+    tab1, tab2 = st.tabs(["🔑 Login", "📝 Register"])
+
+    with tab1:
+        with st.form("login_form"):
+            username = st.text_input("Username")
+            password = st.text_input("Password", type="password")
+            login_btn = st.form_submit_button("Login")
+
+        if login_btn:
+            if login_user(username, password):
+                st.session_state.logged_in = True
+                st.session_state.username = username
+                st.success("✅ Login successful")
+                time.sleep(1)
+                st.rerun()
+            else:
+                st.error("❌ Invalid credentials")
+
+    with tab2:
+        with st.form("register_form"):
+            username = st.text_input("Username")
+            email = st.text_input("Email")
+            password = st.text_input("Password", type="password")
+            register_btn = st.form_submit_button("Register")
+
+        if register_btn:
+            if register_user(username, email, password):
+                st.success("✅ Account created. You can login now.")
+
+    st.markdown("---")
+    st.caption("Built with Streamlit & MySQL (Aiven)")
+
+if __name__ == "__main__":
+    main()
